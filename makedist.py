@@ -16,7 +16,8 @@ import subprocess
 
 all_packages = [
     'darwin-x64',
-    'linux-ia32',
+    'darwin-arm64',
+    'darwin-univ',
     'linux-x64',
     'win32-ia32',
     'win32-x64',
@@ -36,6 +37,9 @@ popt.add_option('-n', '--none',
 popt.add_option('-g', '--game', '--gamedir',
                 action='store', dest='gamedir',
                 help='directory for game-specific files')
+popt.add_option('--macsign',
+                action='store', dest='macsign',
+                help='Apple Developer cert name')
 popt.add_option('-v', '--version',
                 action='store', dest='buildversion',
                 default='1',
@@ -64,6 +68,7 @@ appfiles = [
     './docicon-glulx.ico',
     './docicon-zcode.ico',
     './docicon-hugo.ico',
+    './docicon-tads.ico',
     './docicon-json.ico',
     './quixe/lib/elkote.min.js',
     './quixe/lib/jquery-1.12.4.min.js',
@@ -74,7 +79,8 @@ appfiles = [
         'files': [
             './zplay.html',
             './ifvms/zvm.min.js',
-            './ifvms/zvm_dispload.min.js',
+            './ifvms/zvm_dispatch.min.js',
+            './ifvms/gi_load.min.js',
             './ifvms/zvm.css',
             './ifvms/package.json',
         ]
@@ -83,20 +89,16 @@ appfiles = [
         'key': 'emglken',
         'files': [
             './emglkenplay.html',
-            './emglken/hugo.js',
-            './emglken/hugo-core.js.bin',
-            './emglken/hugo-core.js.mem',
-            './emglken/git.js',
-            './emglken/git-core.js.bin',
-            './emglken/git-core.js.mem',
-            './emglken/glulxe.js',
-            './emglken/glulxe-core.js.bin',
-            './emglken/glulxe-core.js.mem',
-            './emglken/glulxe-profiler.js',
-            './emglken/glulxe-profiler-core.js.bin',
-            './emglken/glulxe-profiler-core.js.mem',
-            './emglken/emglken_dispload.min.js',
-            './emglken/versions.json',
+            'emglken/gi_load.min.js',
+            'emglken/git-core.wasm',
+            'emglken/git.js',
+            'emglken/glulxe-core.wasm',
+            'emglken/glulxe.js',
+            'emglken/hugo-core.wasm',
+            'emglken/hugo.js',
+            'emglken/tads-core.wasm',
+            'emglken/tads.js',
+            'emglken/versions.json',
         ]
     },
     {
@@ -178,7 +180,7 @@ def install(resourcedir, pkg):
 
 def builddir(dir, pack, pkg):
     (platform, dummy, arch) = pack.partition('-')
-    
+
     cmd = 'node_modules/.bin/electron-packager'
     args = [
         cmd, 'tempapp', product_name,
@@ -189,7 +191,18 @@ def builddir(dir, pack, pkg):
         '--overwrite'
         ]
 
-    if platform == 'darwin':
+    if platform == 'darwin' and arch == 'univ':
+        cmd = 'node'
+        args = [ cmd, 'tools/makemacuni.js' ]
+        if opts.macsign:
+            args = args + [
+                '--osx-sign.entitlements', 'resources/mac-app.entitlements',
+                '--osx-sign.entitlements-inherit', 'resources/mac-app.entitlements',
+                '--osx-sign.identity', opts.macsign,
+                '--osx-sign.hardenedRuntime', 'true',
+            ]
+    
+    elif platform == 'darwin':
         appid = 'com.eblong.lectrote'
         if opts.gamedir:
             appid = pkg.get('lectroteMacAppID')
@@ -209,6 +222,7 @@ def builddir(dir, pack, pkg):
             '--extra-resource=resources/icon-glulx.icns',
             '--extra-resource=resources/icon-zcode.icns',
             '--extra-resource=resources/icon-hugo.icns',
+            '--extra-resource=resources/icon-tads.icns',
             '--extra-resource=resources/icon-blorb.icns',
             '--extra-resource=resources/icon-gblorb.icns',
             '--extra-resource=resources/icon-zblorb.icns',
@@ -216,6 +230,13 @@ def builddir(dir, pack, pkg):
             '--extra-resource=resources/icon-glkdata.icns',
             '--extra-resource=resources/icon-json.icns',
             '--extend-info', 'resources/Add-Info.plist',
+            ]
+        if opts.macsign:
+            args = args + [
+                '--osx-sign.entitlements', 'resources/mac-app.entitlements',
+                '--osx-sign.entitlements-inherit', 'resources/mac-app.entitlements',
+                '--osx-sign.identity', opts.macsign,
+                '--osx-sign.hardenedRuntime', 'true',
             ]
 
     if platform == 'win32':
@@ -253,14 +274,17 @@ def builddir(dir, pack, pkg):
 
     for filename in rootfiles:
         shutil.copyfile(filename, os.path.join(dir, filename))
-    os.unlink(os.path.join(dir, 'version'))
+    val = os.path.join(dir, 'version')
+    if os.path.exists(val):
+        os.unlink(val)
     
 def makezip(dir, unwrapped=False):
     prefix = product_name + '-'
     val = os.path.split(dir)[-1]
     if not val.startswith(prefix):
         raise Exception('path does not have the prefix')
-    zipfile = product_name + '-' + product_version + '-' + val[len(prefix):]
+    platform = val[len(prefix):]
+    zipfile = product_name + '-' + product_version + '-' + platform
     zipargs = '-q'
     if 'darwin' in zipfile:
         zipfile = zipfile.replace('darwin', 'macos')
@@ -268,7 +292,11 @@ def makezip(dir, unwrapped=False):
         specfile = 'resources/pack-dmg-spec.json'
         if opts.gamedir and os.path.exists(os.path.join(opts.gamedir, specfile)):
             specfile = os.path.join(opts.gamedir, specfile)
-        subprocess.call('rm -f "dist/%s.dmg"; node_modules/.bin/appdmg "%s" "dist/%s.dmg"' % (zipfile, specfile, zipfile),
+        tmpspecfile = specfile.replace('/pack-dmg-spec.json', '/pack-dmg-spec-tmp.json')
+        dat = open(specfile).read()
+        dat = dat.replace('$PLATFORM$', platform)
+        open(tmpspecfile, 'w').write(dat)
+        subprocess.call('rm -f "dist/%s.dmg"; node_modules/.bin/appdmg "%s" "dist/%s.dmg"' % (zipfile, tmpspecfile, zipfile),
                         shell=True)
         return
     print('Zipping up: %s to %s (%s)' % (dir, zipfile, ('unwrapped' if unwrapped else 'wrapped')))

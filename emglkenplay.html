@@ -20,15 +20,17 @@ game_options = {
 
 window.$ = window.jQuery = require('./quixe/lib/jquery-1.12.4.min.js');
 if (!game_options.use_unminified_js) {
-  require('./quixe/lib/elkote.min.js');
-  require('./emglken/emglken_dispload.min.js');
+  var elkote_mods = require('./quixe/lib/elkote.min.js');
+  window.GlkOte = elkote_mods.GlkOte;
+  window.Dialog = elkote_mods.Dialog;
+  window.GiLoad = require('./ifvms/gi_load.min.js').GiLoad;
+  //TODO: We are using the older GiLoad bundled with ifvms. This is missing the getlibrary() call, so we patch a stub in here. When ifvms is updated, remove this line.
+  window.GiLoad.getlibrary = function(val) { return null; };    
 }
 else {
-  require('./quixe/src/glkote/glkote.js');
-  require('./quixe/src/glkote/electrofs.js');
-  require('./quixe/src/glkote/glkapi.js');
-  require('./emglken/emglken_dispatch.js');
-  require('./quixe/src/quixe/gi_load.js');
+  window.GlkOte = require('./quixe/src/glkote/glkote.js').GlkOte;
+  window.Dialog = require('./quixe/src/glkote/electrofs.js').Dialog;
+  window.GiLoad = require('./quixe/src/quixe/gi_load.js').GiLoad;
 }
 require('./apphooks.js');
 

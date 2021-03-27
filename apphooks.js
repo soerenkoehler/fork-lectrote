@@ -29,13 +29,22 @@ function load_named_game(arg)
         arr = engine.load(arg, buf, game_options);
 
     GiLoad.load_run(game_options, arr, load_options);
+    /* Note that load_run() is synchronous with this config (the "not a
+       URL at all" path). So Blorb should now be safely inited. */
+    var Blorb = GiLoad.getlibrary('Blorb');
+    if ((!Blorb) || (!Blorb.inited())) {
+        console.log('Blorb is not inited after load_run()!');
+    }
 
     /* Pass some metadata back to the app */
     var obj = {
         title: default_name
     };
 
-    var title = GiLoad.get_metadata('title');
+    var title = undefined;
+    if (Blorb && Blorb.get_metadata) {
+        var title = Blorb.get_metadata('title');
+    }
     if (title)
         obj.title = title;
 
@@ -43,6 +52,14 @@ function load_named_game(arg)
         var signature = engine.get_signature();
         if (signature)
             obj.signature = signature;
+    }
+
+    var coverimageres = undefined;
+    if (Blorb && Blorb.get_cover_pict) {
+        coverimageres = Blorb.get_cover_pict();
+    }
+    if (coverimageres !== undefined) {
+        obj.coverimageres = coverimageres;
     }
 
     electron.ipcRenderer.send('game_metadata', obj);
@@ -53,6 +70,60 @@ function set_clear_autosave(val)
     game_options.clear_vm_autosave = val;
 }
 
+function display_cover_art(dat)
+{
+    /* If the cover art pane is already up, remove it. */
+    var panel = $('#cover_art_pane');
+    if (panel.length) {
+        panel.remove();
+        return;
+    }
+    
+    if (dat) {
+        /* dat is an object containing { url, width, height } of an image. */
+    }
+    else {
+        var Blorb = GiLoad.getlibrary('Blorb');
+        
+        /* dat is null; try to use the cover image data from the blorb. */
+        if (!(Blorb && Blorb.get_cover_pict))
+            return;
+        var coverimageres = Blorb.get_cover_pict();
+        if (coverimageres === undefined)
+            return;
+        
+        var info = Blorb.get_image_info(coverimageres);
+        if (!info)
+            return;
+        var url = Blorb.get_image_url(coverimageres);
+
+        dat = { url:url, width:info.width, height:info.height };
+    }
+
+    if (!dat.url || !dat.width || !dat.height)
+        return;
+    
+    var panel = $('<div>', { id:'cover_art_pane' });
+    var imgel = $('<img>', { src:dat.url });
+    var heightval = Math.round(90 * dat.height / dat.width);
+    imgel.css({ width:'90vmin', height:heightval+'vmin' });
+    panel.append(imgel);
+    var inpel = $('<input>');
+    inpel.val(' Hit any key ');
+    panel.append(inpel);
+
+    var removefunc = function() {
+        $('#cover_art_pane').remove();
+        return true;
+    };
+    panel.on('click', removefunc);
+    inpel.on('keypress', removefunc);
+    inpel.on('keydown', removefunc);
+
+    $('#content').append(panel);
+    inpel.focus();
+}
+    
 function set_zoom_factor(val) 
 {
     var webFrame = electron.webFrame;
@@ -65,8 +136,19 @@ function set_margin_level(val)
     $('#gameport').css({'margin':str});
 }
 
-function set_color_theme(val)
+function set_color_theme(obj)
 {
+    var val = obj.theme;
+    var darklight_flag = obj.darklight;
+    
+    // System-reactive themes:
+    if (val == 'lightdark') {
+        val = (darklight_flag ? 'dark' : 'light');
+    }
+    else if (val == 'sepiaslate') {
+        val = (darklight_flag ? 'slate' : 'sepia');
+    }
+
     var bodyel = $('body');
 
     bodyel.removeClass('SepiaTheme');
@@ -202,7 +284,7 @@ function construct_searchbar()
         return;
 
     barel.empty();
-    var shadow = barel.get(0).createShadowRoot();
+    var shadow = barel.get(0).attachShadow({ mode: 'open' });
 
     var bodyel = $('<div>', { id:'searchbar_body' });
     search_body_el = bodyel;
@@ -278,14 +360,29 @@ function search_request(arg)
     }
 }
 
+function sequence(argls)
+{
+    /* The argument is a list of { key, arg } pairs. */
+    for (var arg of argls) {
+        var func = namespace[arg.key];
+        if (!func) {
+            console.log('sequence: unable to find handler: ' + arg.key);
+            continue;
+        }
+        func(arg.arg);
+    }
+}
+    
 const namespace = {
     load_named_game : load_named_game,
     set_clear_autosave : set_clear_autosave,
+    display_cover_art : display_cover_art,
     set_zoom_factor : set_zoom_factor,
     set_margin_level : set_margin_level,
     set_color_theme : set_color_theme,
     set_font : set_font,
-    search_request : search_request
+    search_request : search_request,
+    sequence : sequence
 };
 
 /* We hook up the namespace to IPC events, so that the main process can

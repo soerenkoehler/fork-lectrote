@@ -21,7 +21,7 @@ var prefs = {
     gamewin_width: 600,
     gamewin_height: 800,
     gamewin_marginlevel: 1,
-    gamewin_colortheme: 'light',
+    gamewin_colortheme: 'lightdark',
     gamewin_font: 'lora',
     gamewin_customfont: null,
     gamewin_zoomlevel: 0,
@@ -333,6 +333,8 @@ function write_prefs_now()
 
 /* Call one of the functions in apphooks.js (in the game renderer process).
    The argument is passed as a JSON string.
+   (This is fire-and-forget! Beware races. If you want to invoke a bunch
+   of hooks, use "sequence".)
 */
 function invoke_app_hook(win, func, arg)
 {
@@ -349,7 +351,7 @@ function invoke_app_hook(win, func, arg)
 function game_file_discriminate(path)
 {
     var fd = fs.openSync(path, 'r');
-    var buf = new Buffer(16);
+    var buf = Buffer.alloc(16);
     var len = fs.readSync(fd, buf, 0, 16, 0);
     fs.closeSync(fd);
 
@@ -398,7 +400,7 @@ function parse_blorb(path)
     var res = null;
 
     var fd = fs.openSync(path, 'r');
-    var buf = new Buffer(16);
+    var buf = Buffer.alloc(16);
 
     var len = fs.readSync(fd, buf, 0, 16, 0);
     if (!(buf[0] == 0x46 && buf[1] == 0x4F && buf[2] == 0x52 && buf[3] == 0x4D
@@ -454,8 +456,8 @@ function select_load_game()
         filters.push({ name:format.longname, extensions:format.extensions });
     }
     
-    if (process.platform !== 'darwin') {
-        /* On Win/Linux, the file dialog can only show one filter-row at a
+    if (true) {
+        /* The file dialog can only show one filter-row at a
            time. So we construct one that has a union of the types, and
            push it onto the beginning of the filters list. */
         var arr = [];
@@ -471,8 +473,11 @@ function select_load_game()
     };
 
     gamedialog = true;
-    electron.dialog.showOpenDialog(null, opts, function(ls) {
+    electron.dialog.showOpenDialog(null, opts).then(function(res) {
         gamedialog = false;
+        if (!res || res.canceled)
+            return;
+        var ls = res.filePaths;
         if (!ls || !ls.length)
             return;
         launch_game(ls[0]);
@@ -529,10 +534,21 @@ function launch_game(path)
         title: require('electron').app.getName(),
         width: prefs.gamewin_width, height: prefs.gamewin_height,
         minWidth: 400, minHeight: 400,
+        backgroundColor: (electron.nativeTheme.shouldUseDarkColors ? '#000' : '#FFF'),
         webPreferences: {
+            spellcheck: false,
+            nodeIntegration: true,
+            contextIsolation: false,
+            enableRemoteModule: false,
             zoomFactor: zoom_factor_for_level(prefs.gamewin_zoomlevel)
         }
     };
+    /* Note that Electron recommends contextIsolation:true, but the
+       way we're including interpreter code isn't compatible with
+       contextIsolation. Shouldn't be a problem since we don't support
+       arbitrary remote/game content. */
+    /* backgroundColor should maybe be based on darkmode+theme, not
+       just the darkmode flag. */
     /* The webPreferences.zoomFactor doesn't seem to take effect in
        Electron 1.6.11, so we'll send it over via IPC later. */
 
@@ -579,20 +595,36 @@ function launch_game(path)
         if (isbound)
             app.quit();
     });
+    win.on('focus', function() {
+        window_focus_update(win, game);
+    });
 
     win.webContents.on('dom-ready', function(ev) {
         var game = game_for_webcontents(ev.sender);
         if (!game)
             return;
-        invoke_app_hook(win, 'set_zoom_factor', winopts.webPreferences.zoomFactor);
-        invoke_app_hook(win, 'set_margin_level', prefs.gamewin_marginlevel);
-        invoke_app_hook(win, 'set_color_theme', prefs.gamewin_colortheme);
-        invoke_app_hook(win, 'set_font', { font:prefs.gamewin_font, customfont:prefs.gamewin_customfont });
+        var funcs = [];
+        funcs.push({
+            key: 'set_zoom_factor',
+            arg: winopts.webPreferences.zoomFactor });
+        funcs.push({
+            key: 'set_margin_level',
+            arg: prefs.gamewin_marginlevel });
+        funcs.push({
+            key: 'set_color_theme',
+            arg: { theme:prefs.gamewin_colortheme, darklight:electron.nativeTheme.shouldUseDarkColors } });
+        funcs.push({
+            key: 'set_font',
+            arg: { font:prefs.gamewin_font, customfont:prefs.gamewin_customfont } });
         if (game.suppress_autorestore) {
-            invoke_app_hook(win, 'set_clear_autosave', true);
+            funcs.push({ key: 'set_clear_autosave', arg: true });
             game.suppress_autorestore = false;
         }
-        invoke_app_hook(win, 'load_named_game', { path: game.path, format: kind.id, engine: game.engineid } );
+        funcs.push({
+            key: 'load_named_game',
+            arg: { path: game.path, format: kind.id, engine: game.engineid } });
+
+        invoke_app_hook(win, 'sequence', funcs);
     });
 
     win.webContents.on('found-in-page', function(ev, res) {
@@ -657,7 +689,7 @@ function reset_game(game)
        the entire app. The async call would only block the game window, but
        that causes weird results (e.g., cmd-Q fails to shut down the blocked
        game window). */
-    var res = electron.dialog.showMessageBox(game.win, winopts);
+    var res = electron.dialog.showMessageBoxSync(game.win, winopts);
     if (res == winopts.cancelId) {
         var win = game.win;
         /* Set a flag to inhibit autorestore (but not autosave). This
@@ -672,8 +704,10 @@ function reset_game(game)
 */
 function open_about_window()
 {
-    var winopts = { 
+    var winopts = {
+        webPreferences: { nodeIntegration: true, contextIsolation: false, enableRemoteModule: false },
         width: 600, height: 450,
+        backgroundColor: (electron.nativeTheme.shouldUseDarkColors ? '#000' : '#FFF'),
         useContentSize: true,
         resizable: false
     };
@@ -698,6 +732,9 @@ function open_about_window()
     aboutwin.on('closed', function() {
             aboutwin = null;
         });
+    aboutwin.on('focus', function() {
+            window_focus_update(aboutwin, null);
+        });
     aboutwin.on('move', window_position_prefs_handler('aboutwin', aboutwin));
     aboutwin.webContents.on('will-navigate', function(ev, url) {
             require('electron').shell.openExternal(url);
@@ -705,6 +742,7 @@ function open_about_window()
         });
 
     aboutwin.webContents.on('dom-ready', function() {
+            aboutwin.webContents.send('set-darklight-mode', electron.nativeTheme.shouldUseDarkColors);
             var ls = construct_recent_game_menu();
             aboutwin.webContents.send('recent-count', ls.length);
         });
@@ -717,7 +755,9 @@ function open_about_window()
 function open_prefs_window()
 {
     var winopts = { 
+        webPreferences: { nodeIntegration: true, contextIsolation: false, enableRemoteModule: false },
         width: 600, height: 530,
+        backgroundColor: (electron.nativeTheme.shouldUseDarkColors ? '#000' : '#FFF'),
         useContentSize: true,
         resizable: false
     };
@@ -736,10 +776,14 @@ function open_prefs_window()
     prefswin.on('closed', function() {
             prefswin = null;
         });
+    prefswin.on('focus', function() {
+            window_focus_update(prefswin, null);
+        });
     prefswin.on('move', window_position_prefs_handler('prefswin', prefswin));
 
     prefswin.webContents.on('dom-ready', function() {
-            prefswin.webContents.send('current-prefs', prefs);
+            prefswin.webContents.send('set-darklight-mode', electron.nativeTheme.shouldUseDarkColors);
+            prefswin.webContents.send('current-prefs', { prefs:prefs, isbound:isbound });
         });
 
     prefswin.loadURL('file://' + __dirname + '/prefs.html');
@@ -749,10 +793,11 @@ function open_prefs_window()
 */
 function open_card_window()
 {
-    var winopts = { 
+    var winopts = {
+        webPreferences: { nodeIntegration: true, contextIsolation: false, enableRemoteModule: false },
         width: 810, height: 600,
-        useContentSize: true,
-        javascript: false
+        backgroundColor: (electron.nativeTheme.shouldUseDarkColors ? '#000' : '#FFF'),
+        useContentSize: true
     };
     window_position_prefs(winopts, 'cardwin');
     if (window_icon)
@@ -769,13 +814,39 @@ function open_card_window()
     cardwin.on('closed', function() {
             cardwin = null;
         });
+    cardwin.on('focus', function() {
+            window_focus_update(cardwin, null);
+        });
     cardwin.on('move', window_position_prefs_handler('cardwin', cardwin));
     cardwin.webContents.on('will-navigate', function(ev, url) {
             require('electron').shell.openExternal(url);
             ev.preventDefault();
         });
 
+    cardwin.webContents.on('dom-ready', function() {
+            cardwin.webContents.send('set-darklight-mode', electron.nativeTheme.shouldUseDarkColors);
+        });
+
     cardwin.loadURL('file://' + __dirname + '/if-card.html');
+}
+
+function window_focus_update(win, game)
+{
+    /* Determine whether the "Display Cover Art" option should be
+       enabled or not. */
+    var showoption = false;
+    if (win && game) {
+        if (game.coverimageres !== undefined || main_extension.cover_image_info) {
+            showoption = true;
+        }
+    }
+
+    var menu = electron.Menu.getApplicationMenu();
+    if (menu) {
+        var item = menu.getMenuItemById('view_cover_art');
+        if (item)
+            item.enabled = showoption;
+    }
 }
 
 function find_in_template(template, key)
@@ -819,7 +890,10 @@ function export_game_file(path)
         filters: [ { name: 'Game File', extensions: [suffix] } ]
     };
 
-    electron.dialog.showSaveDialog(opts, function(destpath) {
+    electron.dialog.showSaveDialog(opts).then(function(res) {
+        if (!res || res.canceled)
+            return;
+        var destpath = res.filePath;
         if (!destpath)
             return;
         copy_file(path, destpath, function(ex) {
@@ -1055,6 +1129,21 @@ function construct_menu_template(special)
                 if (prefswin)
                     prefswin.webContents.send('set-zoom-level', prefs.gamewin_zoomlevel);
             }
+        },
+        { type: 'separator' },
+        {
+            label: 'Display Cover Art',
+            id: 'view_cover_art',
+            enabled: false,
+            click: function(item, win) {
+                var game = game_for_window(win);
+                if (!game)
+                    return;
+                var dat = null;
+                if (main_extension.cover_image_info)
+                    dat = main_extension.cover_image_info;
+                invoke_app_hook(game.win, 'display_cover_art', dat);
+            }
         }
         ]
     },
@@ -1217,7 +1306,14 @@ function construct_menu_template(special)
 
 /* Ensure that only one Lectrote process exists at a time. */
 
-var secondary = app.makeSingleInstance(function(argv, cwd) {
+if (!app.requestSingleInstanceLock()) {
+    /* Another process already exists. Our arguments have been sent
+       to it. */
+    app.quit();
+    return;
+}
+
+app.on('second-instance', (event, argv, cwd) => {
     /* This callback arrives when a second process tries to launch.
        Its arguments are sent here. */
     var count = 0;
@@ -1225,7 +1321,7 @@ var secondary = app.makeSingleInstance(function(argv, cwd) {
         var path = argv[ix];
         if (path_mod.basename(path) == 'main.js' || path_mod.basename(path) == '.')
             continue;
-        if (process.platform == 'darwin' && path.startsWith('-psn'))
+        if (path.startsWith('-'))
             continue;
         if (!app_ready)
             launch_paths.push(path);
@@ -1246,12 +1342,6 @@ var secondary = app.makeSingleInstance(function(argv, cwd) {
         }
     }
 });
-if (secondary) {
-    /* Another process already exists. Our arguments have been sent
-       to it. */
-    app.quit();
-    return;
-}
 
 /* Set up handlers. */
 
@@ -1275,6 +1365,21 @@ app.on('will-quit', function() {
     write_prefs_now();
 });
 
+electron.nativeTheme.on('updated', function() {
+    for (var id in gamewins) {
+        var game = gamewins[id];
+        invoke_app_hook(game.win, 'set_color_theme', { theme:prefs.gamewin_colortheme, darklight:electron.nativeTheme.shouldUseDarkColors });
+    }
+    if (prefswin)
+        prefswin.webContents.send('set-darklight-mode', electron.nativeTheme.shouldUseDarkColors);
+    if (aboutwin)
+        aboutwin.webContents.send('set-darklight-mode', electron.nativeTheme.shouldUseDarkColors);
+    if (cardwin)
+        cardwin.webContents.send('set-darklight-mode', electron.nativeTheme.shouldUseDarkColors);
+    if (main_extension.set_darklight_mode)
+        main_extension.set_darklight_mode(electron.nativeTheme.shouldUseDarkColors);
+});
+
 electron.ipcMain.on('select_load_game', function() {
     if (isbound)
         return;
@@ -1291,6 +1396,29 @@ electron.ipcMain.on('select_load_recent', function() {
     menu.popup(aboutwin);
 });
 
+electron.ipcMain.handle('get_app_paths', function(ev) {
+    var obj = {
+        userData: app.getPath('userData'),
+        temp: app.getPath('temp')
+    };
+    return obj;
+});
+
+electron.ipcMain.handle('dialog_open', function(ev, tosave, opts) {
+    var game = game_for_webcontents(ev.sender);
+    if (!game) {
+        return null;
+    }
+
+    // The showDialog calls return a promise whose ultimate value becomes the RPC return value.
+    if (!tosave) {
+        return electron.dialog.showOpenDialog(game.win, opts);
+    }
+    else {
+        return electron.dialog.showSaveDialog(game.win, opts);
+    }
+});
+
 electron.ipcMain.on('game_metadata', function(ev, arg) {
     var game = game_for_webcontents(ev.sender);
     if (game) {
@@ -1298,6 +1426,11 @@ electron.ipcMain.on('game_metadata', function(ev, arg) {
             game.title = arg.title;
         if (arg.signature)
             game.signature = arg.signature;
+        if (arg.coverimageres !== undefined)
+            game.coverimageres = arg.coverimageres;
+
+        // Bang the focus event to update the "Display Cover Art" menu item.
+        window_focus_update(game.win, game);
     }
 });
 
@@ -1316,7 +1449,7 @@ electron.ipcMain.on('pref_color_theme', function(ev, arg) {
     note_prefs_dirty();
     for (var id in gamewins) {
         var game = gamewins[id];
-        invoke_app_hook(game.win, 'set_color_theme', prefs.gamewin_colortheme);
+        invoke_app_hook(game.win, 'set_color_theme', { theme:prefs.gamewin_colortheme, darklight:electron.nativeTheme.shouldUseDarkColors });
     }
 });
 
@@ -1409,13 +1542,13 @@ app.on('will-finish-launching', function() {
        in process.argv. Unfortunately, the first argument may be "main.js"
        or not, depending on how we were launched. I don't know a way to
        distinguish this other than just special-casing "main.js".
-       We also special-case the "-psn..." argument which MacOS sometimes
-       throws in. */
+       We also ignore any arguments starting with a dash; these appear on
+       various platforms and I don't have a full list. */
     for (var ix=1; ix<process.argv.length; ix++) {
         var path = process.argv[ix];
         if (path_mod.basename(path) == 'main.js' || path_mod.basename(path) == '.')
             continue;
-        if (process.platform == 'darwin' && path.startsWith('-psn'))
+        if (path.startsWith('-'))
             continue;
         launch_paths.push(path);
     }
@@ -1468,6 +1601,7 @@ exports.window_position_prefs = window_position_prefs;
 exports.window_position_prefs_handler = window_position_prefs_handler;
 exports.window_size_prefs = window_size_prefs;
 exports.window_size_prefs_handler = window_size_prefs_handler;
+exports.window_focus_update = window_focus_update;
 exports.zoom_factor = function() { return zoom_factor_for_level(prefs.gamewin_zoomlevel); };
 exports.is_app_ready = function() { return app_ready; };
 exports.is_app_quitting = function() { return app_quitting; };

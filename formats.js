@@ -37,6 +37,35 @@
    the main process.
  */
 
+/* TODO: Switch to the new module format, where modules are provided as classes rather than window.Module.
+   I think the engine will provide a getlibrary() call. Then this function can do:
+   opts.Dialog = engine.getlibrary('Dialog');
+   opts.GlkOte = engine.getlibrary('GlkOte');
+   ...and so on.
+   (Referring to window.GiLoad will remain valid.)
+*/
+
+function common_emglken_load(file, buf, opts) {
+    var engine = new ( require(`./emglken/${file}.js`) )();
+    const data = Uint8Array.from(buf);
+    const vm = opts.vm = window.engine = engine;
+    opts.Dialog = window.Dialog;
+    opts.Glk = opts.io = {
+        fatal_error: window.GlkOte.fatal_error,
+        init(opts) {
+            // Call prepare here because GiLoad will send extracted Glulx files rather than the whole blorb
+            vm.prepare(data, opts);
+            // start will call GlkOte later on
+            vm.start(opts);
+        },
+    };
+    opts.GlkOte = window.GlkOte;
+    if (file === 'git' || file === 'glulxe') {
+        opts.blorb_gamechunk_type = 'GLUL';
+    }
+    return data;
+}
+
 const formatlist = [
 
     {
@@ -75,31 +104,17 @@ const formatlist = [
                 id: 'git',
                 name: 'Git',
                 html: 'emglkenplay.html',
-                load: (arg, buf, opts) => {
-                    var engine = new ( require('./emglken/git.js') )();
-                    opts.vm = window.engine = engine;
-                    opts.Glk = window.Glk;
-                    opts.GiDispa = window.GiDispa;
-                    opts.blorb_gamechunk_type = 'GLUL';
-                    return Uint8Array.from(buf);
-                },
-                get_signature: () => window.engine.get_signature(),
+                load: (arg, buf, opts) => common_emglken_load('git', buf, opts),
+                //get_signature: () => window.engine.get_signature(),
             },
             {
                 id: 'glulxe',
                 name: 'Glulxe',
                 html: 'emglkenplay.html',
-                load: (arg, buf, opts) => {
-                    var engine = new ( require('./emglken/glulxe.js') )();
-                    opts.vm = window.engine = engine;
-                    opts.Glk = window.Glk;
-                    opts.GiDispa = window.GiDispa;
-                    opts.blorb_gamechunk_type = 'GLUL';
-                    return Uint8Array.from(buf);
-                },
-                get_signature: () => window.engine.get_signature(),
+                load: (arg, buf, opts) => common_emglken_load('glulxe', buf, opts),
+                //get_signature: () => window.engine.get_signature(),
             },
-            {
+            /*{
                 id: 'glulxe-profiler',
                 name: 'Glulxe (Profiler)',
                 html: 'emglkenplay.html',
@@ -112,7 +127,7 @@ const formatlist = [
                     return Uint8Array.from(buf);
                 },
                 get_signature: () => window.engine.get_signature(),
-            },
+            },*/
         ],
     },
 
@@ -129,8 +144,10 @@ const formatlist = [
                 name: 'ZVM',
                 html: 'zplay.html',
                 load: (arg, buf, opts) => {
+                    /* TODO: switch to module format. See comment on common_emglken_load() above. */
                     opts.blorb_gamechunk_type = 'ZCOD';
                     opts.vm = window.engine = new window.ZVM();
+                    opts.vm.init = opts.vm.prepare;
                     opts.Glk = window.Glk;
                     opts.Dialog = window.Dialog;
                     return Uint8Array.from(buf);
@@ -154,14 +171,8 @@ const formatlist = [
                 id: 'hugo',
                 name: 'Hugo',
                 html: 'emglkenplay.html',
-                load: (arg, buf, opts) => {
-                    var engine = new ( require('./emglken/hugo.js') )();
-                    opts.vm = window.engine = engine;
-                    opts.Glk = window.Glk;
-                    opts.GiDispa = window.GiDispa;
-                    return Uint8Array.from(buf);
-                },
-                get_signature: () => window.engine.get_signature(),
+                load: (arg, buf, opts) => common_emglken_load('hugo', buf, opts),
+                //get_signature: () => window.engine.get_signature(),
             },
         ],
     },
@@ -199,6 +210,23 @@ const formatlist = [
                     return buf;
                 },
                 get_signature: () => GiLoad.get_game_signature(),
+            },
+        ],
+    },
+
+    {
+        id: 'tads',
+        longname: 'TADS Game File',
+        name: 'TADS',
+        extensions: [ 'gam', 't3' ],
+        docicon: 'docicon-tads.ico',
+        engines: [
+            {
+                id: 'tads',
+                name: 'TADS',
+                html: 'emglkenplay.html',
+                load: (arg, buf, opts) => common_emglken_load('tads', buf, opts),
+                //get_signature: () => window.engine.get_signature(),
             },
         ],
     },

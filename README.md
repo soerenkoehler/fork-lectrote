@@ -3,7 +3,7 @@
 
 ### The IF interpreter in an [Electron][] shell
 
-- Version 1.3.2
+- Version 1.4.0
 - Created by Andrew Plotkin <erkyrath@eblong.com>
 - [Download the latest Lectrote app][releases]
 
@@ -20,15 +20,19 @@ Lectrote currently supports:
 - [Glulx][] games (`.ulx` or `.gblorb`), as produced by [Inform 7][i7].
 - [Z-code][] games (`.z3/.z4/.z5/.z8` or `.zblorb`), as produced by [Inform 7][i7] or earlier versions of Inform.
 - [Hugo][] games (`.hex`).
+- [TADS2 and TADS3][tads] games (`.gam`, `.t3`).
 - [Ink][] compiled game files (`.json`), as produced by the [Ink][] scripting language.
 
 [i7]: http://inform7.com/
 [Glulx]: http://eblong.com/zarf/glulx/
 [Hugo]: http://www.generalcoffee.com/hugo/gethugo.html
 [Ink]: http://www.inklestudios.com/ink
+[tads]: https://tads.org/
 [Z-code]: http://inform-fiction.org/zmachine/standards/z1point1
 
 You can also use this package to construct a "bound game" -- an app which plays a single built-in game. This is a package containing Chromium, the interpreter, your game file, and perhaps some additional configuration. You can distribute this as a standalone game application; it's bulky but it lets people play your game.
+
+Linux note: Depending on your Linux configuration and how you install this package, you may have to add the `--no-sandbox` option when launching Lectrote.
 
 ## Glulx (Inform 7) support
 
@@ -46,6 +50,10 @@ Lectrote uses the [ZVM][] interpreter for Z-machine support. (V3/4/5 and V8 only
 
 The Hugo engine does not currently support autosave.
 
+## TADS support
+
+The TADS 2/3 engine does not currently support autosave.
+
 ## Ink support
 
 This relies on the [inkjs][] interpreter. It is a deliberately non-fancy presentation -- no attempt to slow-print the output or hide the choice list.
@@ -54,15 +62,17 @@ This relies on the [inkjs][] interpreter. It is a deliberately non-fancy present
 
 # License information
 
-- Lectrote is copyright (c) 2016, Andrew Plotkin ([MIT license][licensefile])
-- Electron is copyright (c) 2013-2017 GitHub Inc. ([MIT license][licensefile])
-- Quixe is copyright (c) 2010-2016, Andrew Plotkin ([MIT license][licensefile])
-- inkjs is copyright (c) 2017 Yannick Lohse ([MIT license][licensefile])
+- Lectrote is copyright (c) 2016-2021, Andrew Plotkin ([MIT license][licensefile])
+- Electron is copyright (c) 2013-2021 GitHub Inc. ([MIT license][licensefile])
+- Quixe is copyright (c) 2010-2020, Andrew Plotkin ([MIT license][licensefile])
+- inkjs is copyright (c) 2017-2020 Yannick Lohse ([MIT license][licensefile])
 - ifvms.js is copyright (c) 2016 Dannii Willis and other contributors ([MIT license][licensefile])
 - emglken is copyright (c) 2012-2017, Andrew Plotkin, Dannii Willis ([MIT license][licensefile])
 - Git (in emglken) is copyright (c) 2003 Iain Merrick ([MIT license][licensefile])
 - Glulxe (in emglken) is copyright (c) 1999-2016, Andrew Plotkin ([MIT license][licensefile])
 - Hugo (in emglken)  is copyright (c) 2011 by Kent Tessman ([BSD license][licensefile])
+- TADS (in emglken)  is copyright (c) 1991-2012 by Michael J. Roberts ([dual-licensed GPL/TADS license][licensefile])
+- RemGlk (in emglken) is copyright (c) 2012-2020, Andrew Plotkin ([MIT license][licensefile])
 
 [licensefile]: LICENSE
 
@@ -105,7 +115,17 @@ You can add arguments to narrow down the platforms you are building, e.g.:
     python3 makedist.py linux
     python3 makedist.py win32-x64
 
-If you want to code-sign the Mac version, you currently have to do it manually between the `-b` and `-z` steps. Yes, I should add an option for this.
+To build a universal (Intel/ARM) Mac binary, you must first build the Intel and ARM binaries. This command will build all three:
+
+    python3 makedist.py darwin
+
+If you want to code-sign the Mac version, use the `--macsign` argument:
+
+    python3 makedist.py darwin --macsign 'Developer ID Application: ...'
+
+You must be a registered Apple developer to do this. The argument must be the name of the "Developer Id Application" certificate in your keychain. Run the Keychain Access app to see this. If you don't have one, the easiest way to set it up is to run Xcode, open the Preferences, select Accounts, and hit Manage Certificates.
+
+Building a *signed* universal Mac version is unfortunately a pain in the butt. You must (a) build the `darwin-x64` and `darwin-arm64` versions unsigned; (b) build `darwin-univ` with the `--macsign` argument; (c) build the first two again with the `--macsign` argument. I may streamline this in the future.
 
 ## Packaging a bound game
 
@@ -117,7 +137,7 @@ You will need to create a separate directory for your game's files. Copy `packag
 - `author`: You, the game's author.
 - `description`: One-line description of your game.
 - `lectrotePackagedGame`: Pathname to the game file.
-- `lectroteSoleInterpreter`: Set to `"glulx"`, `"ifvms"`, `"hugo"`, or `"inkjs"` to include just one of Lectrote's interpreter engines. (Optional, but it saves a little bit of space.)
+- `lectroteSoleInterpreter`: Set to `"ifvms"`, `"inkjs"`, `"emglken"` to include just one of Lectrote's interpreter engines. (Optional, but it saves a little bit of space.) (Note that Git, Glulxe, Hugo, and TADS are all handled by the emglken package. There's currently no way to include just one of them.)
 - `lectroteExtraFiles`: An array of extra files to include. These are assumed to be in the game directory, so you do not have to include the directory prefix. (This list must include the game file -- yes, it's redundant with `lectrotePackagedGame`.)
 - `lectroteMacAppID`: If you plan to build a MacOS app, a reverse-DNS ID string to uniquely identify it.
 - `lectroteCopyright`: Copyright string (applied to Windows binaries).
@@ -156,10 +176,37 @@ This file can define new functionality by exporting any of the following Javascr
 - `exports.app_ready()`: Called when the app is ready to open windows. At this point the game window has already been opened.
 - `exports.construct_menu_template(template, special)`: Called to customize the app menu template. The `template` argument is a Javascript data structure as described in [the Electron Menu docs][elemenu]. `special` is null for the game window, or one of the strings `"about", "prefs", "card"` for one of Lectrote's special windows. Modify `template` and return it.
 - `exports.set_zoom_factor(val)`: Called when the app's zoom level changes. The argument is suitable for Electron's `setZoomFactor()` method.
+- `exports.set_darklight_mode(val)`: Called when the OS native theme changes. The argument is false for light theme, true for dark theme.
 - `exports.export_game_path()`: The bound app normally has an "Export Portable Game File..." menu option, which lets the user extract your game file for use in other interpreters. You can implement this function and return null to suppress this menu option. You can also return the pathname of a different game file, which is not actually a useful thing to do.
-- `exports.about_window_size`: An object `{ width:W, height:H }` which customizes the size of the about.html window. (Defaults to `{ width:600, height:450 }`.)
+- `exports.cover_image_info`: An object `{ url:URL, width:W, height:H }` which provides cover art. This is only needed if your game is not a blorb file. (If it is not provided, Lectrote attempts to load the blorb cover art as usual.)
+- `exports.about_window_size`: An object `{ width:W, height:H }` which customizes the size of the `about.html` window. (Defaults to `{ width:600, height:450 }`.)
 
 [elemenu]: http://electron.atom.io/docs/latest/api/menu/
 
 The main Lectrote module exports several functions you can use in your extension code. I have not yet documented them; see the `main.js` file.
 
+#### Style customizations for dark/light mode
+
+As of release 1.3.6 (August 2020), Lectrote supports OS dark theme. You should do the same for any windows you have added or customized.
+
+Look at `about.html` to see how this works. The `evhan_darklight()` function alters the document style; the `onready()` function now sets up a callback for this function. The `<body>` tag now has `<body id="body">` to support this, and several `.DarkMode` stanzas have been added to the CSS. You should copy these changes in your own `about.html`.
+
+When opening a window, use a backgroundColor line to set the loading color, minimizing flash:
+
+	backgroundColor: (electron.nativeTheme.shouldUseDarkColors ? '#000' : '#FFF'),
+
+Then, in the `dom-ready` event, send a message to convey the OS theme:
+
+	win.webContents.send('set-darklight-mode', electron.nativeTheme.shouldUseDarkColors);
+
+Also add a `set_darklight_mode()` routine to your extension code (see above). This routine should send the same message to all open windows.
+
+In the window, set up a handler for this message and adjust your body styles appropriately:
+
+	require('electron').ipcRenderer.on('set-darklight-mode', function(ev, arg) {
+		// arg is false for light mode, true for dark mode.
+	});
+
+See `about.html` and `if-card.html` for examples of dark/light style handling.
+
+Be sure to test that your windows open with the appropriate theme (matching the OS theme), and also that they change dynamically when the OS theme changes.

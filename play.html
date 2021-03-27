@@ -13,6 +13,7 @@ game_options = {
   outspacingx: 0,
   outspacingy: 16,
   use_query_story: false,
+  log_execution_time: true,
   set_page_title: true,
   font_load_delay: true,
   do_vm_autosave: true
@@ -20,16 +21,24 @@ game_options = {
 
 window.$ = window.jQuery = require('./quixe/lib/jquery-1.12.4.min.js');
 if (!game_options.use_unminified_js) {
-  require('./quixe/lib/elkote.min.js');
-  require('./quixe/lib/quixe.min.js');
+  var elkote_mods = require('./quixe/lib/elkote.min.js');
+  window.GlkOteClass = elkote_mods.GlkOteClass;
+  window.BlorbClass = elkote_mods.BlorbClass;
+  window.DialogClass = elkote_mods.DialogClass;
+  window.Glk = elkote_mods.Glk;
+  var quixe_mods = require('./quixe/lib/quixe.min.js');
+  window.Quixe = quixe_mods.Quixe;
+  window.GiDispaClass = quixe_mods.GiDispaClass;
+  window.GiLoad = quixe_mods.GiLoad;
 }
 else {
-  require('./quixe/src/glkote/glkote.js');
-  require('./quixe/src/glkote/electrofs.js');
-  require('./quixe/src/glkote/glkapi.js');
-  require('./quixe/src/quixe/quixe.js');
-  require('./quixe/src/quixe/gi_dispa.js');
-  require('./quixe/src/quixe/gi_load.js');
+  window.GlkOteClass = require('./quixe/src/glkote/glkote.js').GlkOteClass;
+  window.BlorbClass = require('./quixe/src/glkote/gi_blorb.js').BlorbClass;
+  window.DialogClass = require('./quixe/src/glkote/electrofs.js').DialogClass;
+  window.Glk = require('./quixe/src/glkote/glkapi.js').Glk;
+  window.Quixe = require('./quixe/src/quixe/quixe.js').Quixe;
+  window.GiDispaClass = require('./quixe/src/quixe/gi_dispa.js').GiDispaClass;
+  window.GiLoad = require('./quixe/src/quixe/gi_load.js').GiLoad;
 }
 require('./apphooks.js');
 

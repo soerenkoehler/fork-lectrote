@@ -6,7 +6,7 @@ const Story = require('./inkjs/ink.min.js').Story;
 var story = null;
 /* Short string which will (hopefully) be unique per game. */
 var signature = null;
-/* Global taqgs. */
+/* Global tags. */
 var metadata = {};
 
 /* We need to distinguish each turn's hyperlinks. */
@@ -107,7 +107,7 @@ function load_run(optobj, buf)
     catch (ex) {
         console.log("Unable to read globalTags", ex);
     }
-
+    
     {
         var title = metadata.title;
         if (!title)
@@ -134,6 +134,19 @@ function get_game_signature()
 function get_metadata(key)
 {
     return metadata[key];
+}
+
+// Return a stub "Blorb" library.
+function get_library(val)
+{
+    if (val == 'Blorb') {
+        return {
+            inited: function() { return true; },
+            get_metadata: get_metadata
+        };
+    }
+
+    return null;
 }
 
 function game_choose(val)
@@ -180,6 +193,8 @@ function game_cycle()
 */
 function perform_autosave(clear)
 {
+    var Dialog = GlkOte.getlibrary('Dialog');
+    
     if (clear) {
         Dialog.autosave_write(signature, null);
         return;
@@ -214,8 +229,8 @@ function perform_autorestore(snapshot)
 
 window.GiLoad = {
     load_run: load_run,
-    get_metadata: get_metadata,
     get_game_signature: get_game_signature,
+    getlibrary: get_library
 };
 
 
@@ -226,6 +241,8 @@ var game_quit = false;
 
 function startup() 
 {
+    var Dialog = GlkOte.getlibrary('Dialog');
+    
     if (all_options.clear_vm_autosave) {
         Dialog.autosave_write(signature, null);
     }

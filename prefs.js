@@ -6,11 +6,13 @@ const formats = require('./formats.js');
 
 const tablist = [ 'appear', 'terp' ];
 
+var darklight_flag = false;
+
 /* Set up the initial appearance of the window. This adjusts the controls
    and the sample text, but does not send changes to the app (because there
    have been no changes yet).
 */
-function setup_with_prefs(prefs)
+function setup_with_prefs(prefs, isbound)
 {
     var sel, optel;
 
@@ -85,19 +87,25 @@ function setup_with_prefs(prefs)
     apply_zoom_level(prefs.gamewin_zoomlevel);
 
 
-    sel = $('#sel-glulx-terp');
-    sel.prop('disabled', false);
-    sel.empty();
+    if (!isbound) {
+        sel = $('#sel-glulx-terp');
+        sel.prop('disabled', false);
+        sel.empty();
 
-    for (var ix=0; ix<formats.formatmap['glulx'].engines.length; ix++) {
-        var engine = formats.formatmap['glulx'].engines[ix];
-        optel = $('<option>', { value:engine.id }).text(engine.name);
-        if (prefs.glulx_terp == engine.id)
-            optel.prop('selected', true);
-        sel.append(optel);
+        for (var ix=0; ix<formats.formatmap['glulx'].engines.length; ix++) {
+            var engine = formats.formatmap['glulx'].engines[ix];
+            optel = $('<option>', { value:engine.id }).text(engine.name);
+            if (prefs.glulx_terp == engine.id)
+                optel.prop('selected', true);
+            sel.append(optel);
+        }
+
+        sel.on('change', evhan_glulx_terp);
     }
-
-    sel.on('change', evhan_glulx_terp);
+    else {
+        sel = $('#tabheader');
+        sel.hide();
+    }
 }
 
 function set_tab(val)
@@ -126,6 +134,8 @@ function set_tab(val)
 */
 
 var themelist = [
+    { key:'lightdark', label:'System (Light/Dark)' },
+    { key:'sepiaslate', label:'System (Sepia/Slate)' },
     { key:'light', label:'Light' },
     { key:'sepia', label:'Sepia' },
     { key:'slate', label:'Slate' },
@@ -134,6 +144,14 @@ var themelist = [
 
 function apply_color_theme(val)
 {
+    // System-reactive themes:
+    if (val == 'lightdark') {
+        val = (darklight_flag ? 'dark' : 'light');
+    }
+    else if (val == 'sepiaslate') {
+        val = (darklight_flag ? 'slate' : 'sepia');
+    }
+
     var bodyel = $('.Sample');
 
     bodyel.removeClass('SepiaTheme');
@@ -235,6 +253,24 @@ function apply_zoom_level(val)
     el.text(text);
 }
 
+function apply_darklight(val)
+{
+    darklight_flag = val;
+    
+    var el = $('body');
+    if (!darklight_flag) {
+        el.addClass('LightMode');
+        el.removeClass('DarkMode');
+    }
+    else {
+        el.addClass('DarkMode');
+        el.removeClass('LightMode');
+    }
+    
+    var sel = $('#sel-color-theme');
+    var val = sel.val();
+    apply_color_theme(val);
+}
 
 /* The evhan_... functions respond to user manipulation of the controls.
    They invoke apply_... to adjust the sample text, and then send a
@@ -281,8 +317,11 @@ function evhan_glulx_terp()
 
 /* Respond to messages from the app. */
 
+electron.ipcRenderer.on('set-darklight-mode', function(ev, arg) {
+    apply_darklight(arg);
+});
 electron.ipcRenderer.on('current-prefs', function(ev, arg) {
-    setup_with_prefs(arg);
+    setup_with_prefs(arg.prefs, arg.isbound);
 });
 electron.ipcRenderer.on('set-zoom-level', function(ev, arg) {
     $('#range-zoom').val(arg);
